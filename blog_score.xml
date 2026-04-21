@@ -1,0 +1,89 @@
+import requests
+from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
+import time
+import os
+
+# কনফিগারেশন
+URL = "https://www.cricbuzz.com/live-cricket-scores/151856"
+XML_FILE = "blog_score.xml" # এই ফাইলটি আপনার ব্লগের জন্য আপডেট হবে
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
+def create_xml(team_name, score, status, batters):
+    """ডেটা নিয়ে XML ফাইল তৈরি বা আপডেট করে"""
+    root = ET.Element("cricbuzz_live")
+    
+    # ম্যাচ ইনফো
+    match = ET.SubElement(root, "match")
+    ET.SubElement(match, "team").text = team_name
+    ET.SubElement(match, "score").text = score
+    ET.SubElement(match, "status").text = status
+    ET.SubElement(match, "last_updated").text = time.strftime('%H:%M:%S')
+
+    # ব্যাটিং স্ট্যাটস
+    batting_node = ET.SubElement(root, "batting")
+    for b in batters:
+        player = ET.SubElement(batting_node, "player")
+        ET.SubElement(player, "name").text = b['name']
+        ET.SubElement(player, "runs").text = b['runs']
+        ET.SubElement(player, "balls").text = b['balls']
+        ET.SubElement(player, "sr").text = b['sr']
+
+    # ফাইল সেভ করা
+    tree = ET.ElementTree(root)
+    tree.write(XML_FILE, encoding="utf-8", xml_declaration=True)
+
+def start_live_update():
+    while True:
+        try:
+            response = requests.get(URL, headers=HEADERS)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # ১. মেইন স্কোর স্ক্র্যাপিং
+                score_div = soup.find("div", class_="flex flex-row font-bold text-xl")
+                team_name = "N/A"
+                score_val = "N/A"
+                if score_div:
+                    team_name = score_div.find("div", class_="mr-2").text.strip()
+                    score_val = score_div.find_all("div")[1].text.strip()
+
+                status_div = soup.find("div", class_="text-cbTxtLive")
+                status = status_div.text.strip() if status_div else "Live"
+
+                # ২. ব্যাটিং ডেটা স্ক্র্যাপিং
+                batters_list = []
+                rows = soup.find_all("div", class_="scorecard-bat-grid")
+                for row in rows:
+                    name_tag = row.find("a", href=True)
+                    if name_tag and "profiles" in name_tag['href']:
+                        stats = row.find_all("div", recursive=False)
+                        if len(stats) >= 6:
+                            batters_list.append({
+                                'name': name_tag.text.strip().replace("*", ""),
+                                'runs': stats[1].text.strip(),
+                                'balls': stats[2].text.strip(),
+                                'sr': stats[5].text.strip()
+                            })
+
+                # XML ফাইল আপডেট করা
+                create_xml(team_name, score_val, status, batters_list)
+                
+                # কনসোলে ফিডব্যাক দেওয়া
+                os.system('cls' if os.name == 'nt' else 'clear')
+                print(f"✅ XML Updated! Match: {team_name} | Score: {score_val}")
+                print(f"🕒 Last Sync: {time.strftime('%H:%M:%S')}")
+                print(f"📁 File saved as: {XML_FILE}")
+            
+            else:
+                print("Failed to fetch data. Retrying...")
+
+        except Exception as e:
+            print(f"Error occurred: {e}")
+
+        time.sleep(30) # ৩০ সেকেন্ড পর পর আপডেট হবে
+
+if __name__ == "__main__":
+    start_live_update()
