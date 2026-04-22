@@ -8,7 +8,7 @@ import time
 GITHUB_TOKEN = "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" 
 REPO_OWNER = "iamahsanhabib"
 REPO_NAME = "live-score"
-FILE_PATH = "blog_score.xml"
+FILE_PATH = "151867.xml"
 MATCH_URL = "https://www.cricbuzz.com/live-cricket-scores/151867"
 
 def update_github_api(content):
