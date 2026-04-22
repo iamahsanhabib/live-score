@@ -1,1 +1,109 @@
+import requests
+import base64
+from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
+import time
 
+# --- কনফিগারেশন ---
+GITHUB_TOKEN = "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" 
+REPO_OWNER = "iamahsanhabib"
+REPO_NAME = "live-score"
+FILE_PATH = "blog_score.xml"
+MATCH_URL = "https://www.cricbuzz.com/live-cricket-scores/151867"
+
+def update_github_api(content):
+    """গিট ছাড়াই সরাসরি API দিয়ে গিটহাবে ফাইল আপডেট"""
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    # বর্তমান ফাইলের 'sha' সংগ্রহ (আপডেটের জন্য এটি লাগে)
+    res = requests.get(url, headers=headers)
+    sha = res.json().get('sha') if res.status_code == 200 else None
+
+    # ফাইল কনটেন্ট এনকোড করা
+    encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    
+    data = {
+        "message": f"Score update: {time.strftime('%H:%M:%S')}",
+        "content": encoded_content,
+        "sha": sha
+    }
+    
+    put_res = requests.put(url, json=data, headers=headers)
+    if put_res.status_code in [200, 201]:
+        print(f"🚀 GitHub updated successfully! [{time.strftime('%H:%M:%S')}]")
+    else:
+        print("❌ Update failed:", put_res.json().get('message'))
+
+def scrape_and_update():
+    """Cricbuzz থেকে ডেটা নিয়ে আপডেট করা"""
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    try:
+        response = requests.get(MATCH_URL, headers=headers)
+        if response.status_code != 200:
+            print("Failed to fetch Cricbuzz page")
+            return
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # টিম ও স্কোর বের করা
+        score_div = soup.find("div", class_="flex flex-row font-bold text-xl")
+        if not score_div:
+            print("Score not found. Maybe match hasn't started.")
+            return
+
+        team = score_div.find("div", class_="mr-2").text.strip()
+        score = score_div.find_all("div")[1].text.strip()
+        
+        status_div = soup.find("div", class_="text-cbTxtLive")
+        status = status_div.text.strip() if status_div else "Live"
+
+        # ব্যাটিং ডেটা
+        batters_list = []
+        rows = soup.find_all("div", class_="scorecard-bat-grid")
+        for row in rows:
+            name_tag = row.find("a", href=True)
+            if name_tag and "profiles" in name_tag['href']:
+                stats = row.find_all("div", recursive=False)
+                if len(stats) >= 6:
+                    batters_list.append({
+                        'name': name_tag.text.strip().replace("*", ""),
+                        'runs': stats[1].text.strip(),
+                        'balls': stats[2].text.strip(),
+                        'sr': stats[5].text.strip()
+                    })
+
+        # XML তৈরি করা
+        root = ET.Element("cricbuzz_live")
+        m = ET.SubElement(root, "match")
+        ET.SubElement(m, "team").text = team
+        ET.SubElement(m, "score").text = score
+        ET.SubElement(m, "status").text = status
+        ET.SubElement(m, "last_updated").text = time.strftime('%I:%M:%S %p')
+
+        bat_node = ET.SubElement(root, "batting")
+        for b in batters_list:
+            p = ET.SubElement(bat_node, "player")
+            ET.SubElement(p, "name").text = b['name']
+            ET.SubElement(p, "runs").text = b['runs']
+            ET.SubElement(p, "balls").text = b['balls']
+            ET.SubElement(p, "sr").text = b['sr']
+
+        xml_data = ET.tostring(root, encoding="unicode")
+        
+        # GitHub-এ পাঠানো
+        update_github_api(xml_data)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+# লুপ শুরু
+if __name__ == "__main__":
+    print("🏏 Starting Scoreboard Bot...")
+    while True:
+        scrape_and_update()
+        time.sleep(60) # ১ মিনিট পর পর আপডেট হবে
